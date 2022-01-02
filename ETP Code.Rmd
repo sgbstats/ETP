@@ -1,0 +1,415 @@
+---
+title: "Evaluating the impact of an enhanced triage process on the performance and diagnostic yield of oesophageal physiology studies post COVID-19"
+output: word_document
+knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding, output_file = file.path(dirname(inputFile), 'ETP results.docx')) })
+---
+
+
+```{r setup,  echo=F, warning=F, message=F}
+library(readxl)
+library(tidyverse)
+library(flextable)
+pre=read_excel("Data/Referrals.xlsx", sheet="Referrals pre-lockdown")
+post=read_excel("Data/Referrals.xlsx", sheet="Referrals post-lockdown")
+decline=read_excel("Data/Referrals.xlsx", sheet="Patients declining test")
+
+FitFlextableToPage <- function(ft, pgwidth = 8){
+  
+  ft_out <- ft 
+  
+  ft_out <- width(ft_out, width = dim(ft_out)$widths*pgwidth /(flextable_dim(ft_out)$widths))
+  return(ft_out)
+}
+pval=function(p)
+{
+  if(p>=0.1)
+  {
+    out=paste("p=",as.character(round(p, 2)), sep="")
+  }else if(p>=0.05)
+  {
+    out=paste("p=",as.character(round(p, 3)), sep="")
+  }else if(p<0.001)
+  {
+    out="p<0.001" 
+  }else if(p<0.01)
+  {
+    out=paste("p=",as.character(round(p, 3)),"", sep="") 
+  }else if(p<0.05)
+  {
+    out=paste("p=",as.character(round(p, 3)),"", sep="") 
+  }
+  return(out)
+}
+```
+
+
+```{r,  echo=F, warning=F, message=F}
+pre=pre %>% mutate(era="Pre-ETP")
+post=post%>% mutate(era="Post-ETP")
+
+all=rbind.data.frame(pre,post) %>% 
+  mutate( `Routine or Urgent`=factor(if_else(`Routine or Urgent`=="Planned", "Routine", `Routine or Urgent`), c("All", "Routine", "Urgent"), ordered=T),
+         Gender=str_to_title(Gender),
+         `AGIP traffic light code`=factor(str_to_title(`AGIP traffic light code`), c("All", "Red", "Amber", "Green"), ordered=T),
+         # `Chicago Classification`=str_to_title(`Chicago Classification`)
+         `Major/Minor`=factor(if_else(`Chicago Classification`=="Normal", "Normal", `Major/Minor`), c("All", "Major", "Minor", "Normal"),ordered=T),
+         era=factor(era, c("All",  "Pre-ETP", "Post-ETP"), ordered = T),
+         `Acid Reflux Finding`=factor(if_else(`Acid Reflux Finding` %in% c("Normal", "Mild", "Moderate", "Severe"), `Acid Reflux Finding`, "Not Done"), c("Severe", "Moderate", "Mild", "Normal", "Not Done"), ordered=T),
+         `Referral Date`=as.Date(`Referral Date`),
+         `Test Date`=as.Date(`Test Date`),
+         `Reflux Indications`=str_to_sentence(`Reflux Indications`),
+         `Swallowing indications`=str_to_sentence(`Swallowing indications`),
+         `Acid Reflux Finding`=factor(`Acid Reflux Finding`, c("Severe", "Moderate", "Mild", "Normal", "Not Done"), ordered = T)) %>% 
+  group_by(SNO) %>% 
+  mutate(time=case_when(era=="Pre-ETP"~`Test Date`-`Referral Date`,
+                        era=="Post-ETP"~`Test Date`-max(`Referral Date`, as.Date("2020-09-29")))) %>% 
+  ungroup()
+
+indication=all %>% dplyr::select(SNO, `Indications on Referral`) %>% 
+  rbind.data.frame(decline %>% dplyr::select(SNO, `Indications on Referral`)) %>% 
+  separate(`Indications on Referral`, sep=",", into=c("I1", "I2", "I3", "I4")) %>% 
+  pivot_longer(cols=c(-SNO), values_to="Indication", names_to="foo") %>% dplyr::select(-foo) %>% filter(!is.na(Indication)) %>% 
+  mutate(Indication=str_to_title(trimws(str_replace_all(str_replace_all(str_to_upper(Indication), "[[:punct:]]", ""), "ABDO", "Abdominal"))),
+         Indication=case_when(grepl("cough", Indication, ignore.case = T)~"Cough",
+                              Indication=="Regurgitaion"~"Regurgitation",
+                              Indication=="Vomiting"~"Vomitting",
+                              Indication=="Refux"~"Reflux",
+                              Indication=="Heart Burn" ~"Heartburn",
+                              Indication=="Egj Outflow Obstruction Progression"~ "EGJ Outflow Obstruction Progression",
+                              Indication=="Sob"~"Shortness of Breath",
+                              T~Indication))
+
+
+decline=decline %>% 
+  mutate(Gender=str_to_title(Gender),
+         `Reason Group`=case_when(`Reason for Declining`%in% c("Resolution of symptoms")~"Resolution of symptoms",
+                                  `Reason for Declining`%in% c("Had test performed elsewhere",
+                                                               "Another cause was found for the symptoms", 
+                                                               "Deceased")~"No longer needed test",
+                                  `Reason for Declining`%in% c("ETP-19 symptoms",
+                                                               "Currently recovering from spinal surgery",
+                                                               "Currently too unwell with other clinical problems", 
+                                                               "Recovering from shoulder surgery",
+                                                               "Recovering from wrist surgery",
+                                                               "Patient has dementia so family declined",
+                                                               "Pregnant" )~"Unable to attend due to other clinical problem",
+                                  `Reason for Declining`%in% c("Currently in Portugal with no return due to COVID-19",
+                                                               "Unable to take time off work",
+                                                               "Unable to get childcare",
+                                                               "Currently caring for sick husband")~"Unable to attend due to other committments",
+                                  `Reason for Declining`%in% c("Anxiety",
+                                                               "Decline in mental health",
+                                                               "Did not feel that they could tolerate the test")~"Misc. Mental Health issues",
+                                  `Reason for Declining`%in% c("Apprehension around COVID-19" )~"Apprehension around COVID-19" ,
+                                  T~"Other"))
+male=sum(all$Gender=="Male")/nrow(all)
+mpre=sum(all$Gender=="Male"&all$era=="Pre-ETP")/sum(all$era=="Pre-ETP")
+mpost=sum(all$Gender=="Male"&all$era=="Post-ETP")/sum(all$era=="Post-ETP")
+
+age=mean(all$Age)
+agepre=mean((all %>% filter(era=="Pre-ETP"))$Age)
+agepost=mean((all %>% filter(era=="Post-ETP"))$Age)
+
+agesd=sd(all$Age)
+agepresd=sd((all %>% filter(era=="Pre-ETP"))$Age)
+agepostsd=sd((all %>% filter(era=="Post-ETP"))$Age)
+
+```
+
+# Demographics
+
+```{r,  echo=F, warning=F, message=F}
+d1=all %>% as.data.frame() %>% 
+  group_by(era) %>% 
+  summarize(m=mean(Age), sd=sd(Age)) %>% 
+  mutate(msd=paste(round(m,1)," (",round(sd,2),")", sep="")) %>% 
+  dplyr::select(era, msd) %>% 
+  pivot_wider(values_from = "msd", names_from="era") %>% 
+  mutate(param="Age", group="Mean (SD)")
+
+d2=all %>% as.data.frame() %>% 
+  group_by(era, Gender) %>% 
+  tally() %>%
+  merge(all %>% group_by(`era`) %>% tally(), by="era")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "era", values_from="n_pc", values_fill="0")%>% 
+  rename("group"="Gender") %>% 
+  mutate(param="Gender")
+
+d3=all %>% as.data.frame() %>% 
+  group_by(era, `Routine or Urgent`) %>% 
+  tally() %>%
+  merge(all %>% group_by(`era`) %>% tally(), by="era")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "era", values_from="n_pc", values_fill="0") %>% 
+  rename("group"="Routine or Urgent") %>% 
+  mutate(param="Routine or Urgent")
+
+d4=all %>% as.data.frame() %>% 
+  mutate(indication=factor(case_when(`Swallowing indications`=="Yes"&`Reflux Indications`=="Yes"~"Both",
+                                     `Swallowing indications`=="Yes"~"Swallowing Only",
+                                     `Reflux Indications`=="Yes"~"Reflux Only",
+                                     T~"Neither"), c("Both", "Swallowing Only","Reflux Only","Neither"), ordered=T)) %>% 
+  group_by(era, indication) %>% 
+  tally() %>%
+  merge(all %>% group_by(`era`) %>% tally(), by="era")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "era", values_from="n_pc", values_fill="0")%>% 
+  rename("group"="indication") %>% 
+  mutate(param="Swallowing and Reflux Indications")
+
+d5=all %>% as.data.frame() %>% 
+  group_by(era, `Major/Minor`) %>% 
+  tally() %>%
+  merge(all %>% group_by(`era`) %>% tally(), by="era")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "era", values_from="n_pc", values_fill="0") %>% 
+  rename("group"="Major/Minor") %>% 
+  mutate(param="Finding",
+         group=as.character(group),
+         group=if_else(is.na(group), "Not Done", group))
+
+d6=all %>% as.data.frame() %>% 
+  group_by(era, `Acid Reflux Finding`) %>% 
+  tally() %>%
+  merge(all %>% group_by(`era`) %>% tally(), by="era")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "era", values_from="n_pc", values_fill="0") %>% 
+  rename("group"="Acid Reflux Finding") %>% 
+  mutate(param="Acid Reflux Finding")
+
+d7=all %>% as.data.frame() %>% 
+  filter(era=="Post-ETP") %>% 
+  group_by(era, `AGIP traffic light code`) %>% 
+  tally() %>%
+  merge(all %>% group_by(`era`) %>% tally(), by="era")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "era", values_from="n_pc", values_fill="0") %>% 
+  rename("group"="AGIP traffic light code") %>% 
+  mutate(param="AGIP traffic light code")
+
+da=rbind.data.frame(d1,d2,d3,d4,d5,d6) %>% 
+  union_all(d7) %>% 
+  dplyr::select(param, group, `Pre-ETP`, `Post-ETP`) %>% 
+  mutate(ord=row_number())
+
+d7=all %>% as.data.frame() %>% 
+  filter(era=="Post-ETP") %>% 
+  group_by(`AGIP traffic light code`) %>% 
+  summarize(m=mean(Age), sd=sd(Age)) %>% 
+  mutate(msd=paste(round(m,1)," (",round(sd,2),")", sep="")) %>% 
+  dplyr::select(`AGIP traffic light code`, msd) %>% 
+  pivot_wider(values_from = "msd", names_from="AGIP traffic light code") %>% 
+  mutate(param="Age", group="Mean (SD)")
+
+d8=all %>% as.data.frame() %>% 
+  filter(era=="Post-ETP") %>% 
+  group_by(`AGIP traffic light code`, Gender) %>% 
+  tally() %>%
+  merge(all %>% filter(era=="Post-ETP") %>%  group_by(`AGIP traffic light code`) %>% tally(), by="AGIP traffic light code")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "AGIP traffic light code", values_from="n_pc", values_fill="0")%>% 
+  rename("group"="Gender") %>% 
+  mutate(param="Gender")
+
+d9=all %>% as.data.frame() %>% 
+  filter(era=="Post-ETP") %>% 
+  group_by(`AGIP traffic light code`, `Routine or Urgent`) %>% 
+  tally() %>%
+  merge(all %>% filter(era=="Post-ETP") %>% group_by(`AGIP traffic light code`) %>% tally(), by="AGIP traffic light code")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "AGIP traffic light code", values_from="n_pc", values_fill="0") %>% 
+  rename("group"="Routine or Urgent") %>% 
+  mutate(param="Routine or Urgent")
+
+d10=all %>% as.data.frame() %>% 
+  filter(era=="Post-ETP") %>% 
+  mutate(indication=factor(case_when(`Swallowing indications`=="Yes"&`Reflux Indications`=="Yes"~"Both",
+                                     `Swallowing indications`=="Yes"~"Swallowing Only",
+                                     `Reflux Indications`=="Yes"~"Reflux Only",
+                                     T~"Neither"), c("Both", "Swallowing Only","Reflux Only","Neither"), ordered=T)) %>% 
+  group_by(`AGIP traffic light code`, indication) %>% 
+  tally() %>%
+  merge(all %>% filter(era=="Post-ETP") %>% group_by(`AGIP traffic light code`) %>% tally(), by="AGIP traffic light code")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "AGIP traffic light code", values_from="n_pc", values_fill="0")%>% 
+  rename("group"="indication") %>% 
+  mutate(param="Swallowing and Reflux Indications")
+
+d11=all %>% as.data.frame() %>% 
+  filter(era=="Post-ETP") %>%  
+  group_by(`AGIP traffic light code`, `Major/Minor`) %>% 
+  tally() %>%
+  merge(all %>% filter(era=="Post-ETP") %>% group_by(`AGIP traffic light code`) %>% tally(), by="AGIP traffic light code")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "AGIP traffic light code", values_from="n_pc", values_fill="0") %>% 
+  rename("group"="Major/Minor") %>% 
+  mutate(param="Finding",
+         group=as.character(group),
+         group=if_else(is.na(group), "Not Done", group))
+
+d12=all %>% as.data.frame() %>% 
+  filter(era=="Post-ETP") %>% 
+  group_by(`AGIP traffic light code`, `Acid Reflux Finding`) %>% 
+  tally() %>%
+  merge(all %>% filter(era=="Post-ETP") %>% group_by(`AGIP traffic light code`) %>% tally(), by="AGIP traffic light code")%>%
+  mutate(n_pc=paste(n.x, " (" ,round(100*n.x/n.y,1), "%)", sep="")) %>% 
+  dplyr::select(-n.x, -n.y) %>% 
+  pivot_wider(names_from = "AGIP traffic light code", values_from="n_pc", values_fill="0") %>% 
+  rename("group"="Acid Reflux Finding") %>% 
+  mutate(param="Acid Reflux Finding")
+
+
+db=rbind.data.frame(d7,d8,d9,d10,d11,d12) %>%
+  dplyr::select(param, group, Red, Amber, Green)
+
+
+merge(da,db, by=c("param", "group"), all.x=T) %>% 
+  arrange(ord) %>% 
+  dplyr::select(-ord) %>%
+  flextable() %>%
+  set_header_labels(param="",
+                    group="",
+                    `Pre-ETP`="Pre-ETP \n N=135", 
+                    `Post-ETP`="Post-ETP \n N=99",
+                    `Red`="Red \n N=29",
+                    `Amber`="Amber \n N=13",
+                    `Green`="Green \n N=57") %>%
+  add_header(param="",
+             group="",
+             `Pre-ETP`="Era", 
+             `Post-ETP`="Era",
+             `Red`="AGIP Traffic light code",
+             `Amber`="AGIP Traffic light code",
+             `Green`="AGIP Traffic light code") %>% 
+  align(j=3:7, align="center", part="header") %>%
+  align(j=3:7,align="center", part="body") %>%
+  valign(valign="bottom", part = "header")%>%
+  valign(valign="top", part = "body")%>%
+  merge_h(part="header") %>% 
+  merge_v(j=1)%>%
+  FitFlextableToPage(pgwidth = 7) %>%
+  fontsize(size=9, part="all")
+```
+
+
+# Referrals
+
+```{r,  echo=F, warning=F, message=F}
+attend=data.frame("Status"=c("Attended, had test","Attended, unable to tolerate", "Declined", "No Show"),  "Pre-ETP"=c(nrow(pre),39, 16, 19), "Post-ETP"=c(nrow(post),22, nrow(decline), 5)) %>% 
+  mutate(Pre.ETP= paste(Pre.ETP, " (", round(100*Pre.ETP/209,1), "%)", sep=""),
+         Post.ETP=paste(Post.ETP, " (", round(100*Post.ETP/176,1), "%)", sep="") )
+
+
+attend %>% flextable() %>% set_header_labels(Status="", Pre.ETP="Pre-ETP \n N=209", Post.ETP="Post-ETP \n N=176") %>% align(align="center", part="header") %>% 
+  align(j=2:3,align="center", part="body") %>% FitFlextableToPage(pgwidth = 5) %>% fontsize(size=9, part="all") 
+
+p=prop.test(x=c(19,5), n=c(209,176))
+
+```
+
+
+
+
+In the Post-Covid era, there were fewer missed appointments (difference=`r round(100*(5/176-19/209), 1)`%pts, reduction=`r round(100*(1-(5/176)/(19/209)), 1)`%, `r pval(p$p.value)`). 
+
+
+
+# Findings for AGIP Traffic Light
+
+```{r,  echo=F, warning=F, message=F, fig.width=7,fig.height=4.5}
+t14=all %>% dplyr::select(SNO, `Major/Minor`, `AGIP traffic light code`, era) %>%  filter(!is.na(`Major/Minor`)&era=="Post-ETP") %>% group_by(`Major/Minor`,`AGIP traffic light code`) %>% tally() %>% ungroup()
+library(DescTools)
+
+jt=JonckheereTerpstraTest(as.numeric(`Major/Minor`)~`AGIP traffic light code`, data=all %>% filter(!is.na(`Major/Minor`)))
+
+
+t11=all %>% dplyr::select(SNO, `Major/Minor`, `AGIP traffic light code`, era) %>%  filter(!is.na(`Major/Minor`)&era=="Post-ETP") %>% tally() %>% mutate(`Major/Minor`="All",`AGIP traffic light code`="All")%>% ungroup()
+t13=all %>% dplyr::select(SNO, `Major/Minor`, `AGIP traffic light code`, era) %>%  filter(!is.na(`Major/Minor`)&era=="Post-ETP") %>% group_by(`AGIP traffic light code`) %>% tally() %>% mutate(`Major/Minor`="All")%>% ungroup()
+t14 %>% 
+  dplyr::select(`AGIP traffic light code`, `Major/Minor`, n) %>% 
+  merge(rbind.data.frame(t11,t13) %>% dplyr::select(`AGIP traffic light code`, n), by="AGIP traffic light code") %>% 
+  mutate(`AGIP traffic light code`=factor(str_to_title(`AGIP traffic light code`), c("All", "Red", "Amber", "Green"), ordered=T)) %>% 
+  arrange( `AGIP traffic light code`) %>%
+  mutate(n_pc=100*n.x/n.y) %>% 
+  dplyr::select(-n.x,-n.y) %>% 
+  ggplot( aes(x=`AGIP traffic light code`, y=n_pc, fill=`Major/Minor`))+
+  geom_bar(position = position_dodge(width = 0.7), stat="identity", width=0.6)+
+  scale_fill_manual(values=c("#810f7c","#8c6bb1","#9ebcda" ))+
+  ylab("Percentage of patients with finding (%)")+
+  xlab("AGIP triage hierarchy group")+
+  ylim(c(0,55))+
+  theme_bw()+
+  labs(fill="Finding")
+ggsave("Plots/fig2.png", height=12, width=17, units="cm", device = "png")
+
+```
+
+A core finding here is that significantly more people triaged as Red go on to have major findings (JT test: `r pval(jt$p.value)`).
+
+# Time to be seen
+
+```{r,  echo=F, warning=F, message=F, fig.width=7,fig.height=4.5}
+
+
+n1=all%>% filter(!is.na(`Major/Minor`)) %>% group_by(era, `Major/Minor`) %>% tally()
+n1$x=c(seq(from=0.75, to=1.25, length=3), seq(from=1.75, to=2.25, length=3))
+
+all%>%  filter(!is.na(`Major/Minor`)) %>% 
+  ggplot(aes(x=era, y=time )) + 
+  geom_boxplot(aes(fill=`Major/Minor`))+
+  theme_bw()+
+  scale_fill_manual(values=c("#810f7c","#8c6bb1","#9ebcda" ))+
+  ylab("Adjusted time-to-test (Days)")+
+  xlab("Era")+
+  labs(fill="Finding")+
+  ylim(c(0,200))
+
+ggsave("Plots/fig1.png", height=12, width=17, units="cm")
+timerank=all %>% mutate(rank=rank(time)) %>% filter(!is.na(`Major/Minor`)) %>% group_by(era) %>% mutate(erarank=rank(time)) %>% ungroup() %>% mutate(time=as.numeric(time))
+
+s=summary(aov(time~era*`Major/Minor`, data=all))
+
+nonoutliers=all %>% group_by(era, `Major/Minor`) %>% filter(!(time-quantile(time, 0.75)>1.5*(quantile(time,0.75)-quantile(time,0.25)))&!(quantile(time, 0.25)-time>1.5*(quantile(time,0.75)-quantile(time,0.25))))
+s3=summary(aov(time~era*`Major/Minor`, data=nonoutliers))
+s4=summary(aov(time~era*`Major/Minor`, data=all %>% filter(time<183)))
+
+```
+
+From the above plot, we can quite clearly see that the new triage system means that those with Major findings are on the whole seen quicker that those without. Pre-ETP, there was very little difference between the time to get seen by finding but now with the massive backlog the major case are being seen sooner. We computed an ANOVA model with time to test (Pre-ETP: Referral to test, Post-ETP: Referral or service resumption (whichever is later) to test) and independent variables of era and finding (with interaction). There was a significant interaction between era and finding ($F_{2,225}$=`r round(s[[1]][3,4],2)`,`r pval(s[[1]][3,5])`). As a sensitivity analysis, ANOVA was performed on the data removing all outliers ($F_{2,207}$=`r round(s[[1]][3,4],2)`,`r pval(s3[[1]][3,5])`) and all patients who were not seen within 6 months ($F_{2,223}$=`r round(s[[1]][3,4],2)`, `r pval(s4[[1]][3,5])`).
+
+## Acid reflux
+
+```{r,  echo=F, warning=F, message=F, fig.width=7,fig.height=4.5}
+n2=all%>% filter(!is.na(`Acid Reflux Finding`)&`Acid Reflux Finding`!="Not Done" &`Reflux Indications`=="Yes") %>% mutate(AR=if_else(`Acid Reflux Finding`=="Normal", "Normal", "Abnormal")) %>%group_by(era, AR) %>% tally()
+n2$x=c(seq(from=0.8, to=1.2, length=2), seq(from=1.8, to=2.2, length=2))
+
+all%>%  filter(!is.na(`Acid Reflux Finding`)&`Acid Reflux Finding`!="Not Done" &`Reflux Indications`=="Yes") %>% 
+  mutate(AR=factor(if_else(`Acid Reflux Finding`=="Normal", "Normal", "Pathological \nGastroesophageal \nReflux"),c( "Pathological \nGastroesophageal \nReflux", "Normal"),ordered = T)) %>% 
+  ggplot(aes(x=era, y=time )) + 
+  geom_boxplot(aes(fill=`AR`))+
+  theme_bw()+
+  scale_fill_manual(values=c("#ce1256","#c994c7"  ))+
+  ylab("Adjusted time-to-test (Days)")+
+  xlab("Era")+
+  labs(fill="Finding")+
+  ylim(c(0,200))
+
+  
+ggsave("Plots/fig3.png", height=12, width=17, units="cm")
+
+s2=summary(aov(time~era*`AR`, data=all %>%filter(!is.na(`Acid Reflux Finding`)&`Acid Reflux Finding`!="Not Done" &`Reflux Indications`=="Yes") %>% mutate(AR=if_else(`Acid Reflux Finding`=="Normal", "Normal", "Pathological \nGastroesophageal \nReflux")) ))
+
+```
+
+It can be seen here that there is no significant interaction between AR finding and era ($F_{1,151}$=`r round(s2[[1]][3,4],2)`,`r pval(s2[[1]][3,5])`). These include only patients that had the test done and had a reflux indication on referral.
